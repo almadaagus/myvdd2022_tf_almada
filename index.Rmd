@@ -1,0 +1,563 @@
+---
+title: "**Copa del mundo FIFA** a través de los años."
+subtitle: "Trabajo final de la materia **Manejo y visualización de datos**,<br> Maestría en Estadística Aplicada, UNR."
+author:
+  - Agustín Almada
+output:
+  rmdformats::robobook:
+    self_contained: true
+    lightbox: true
+    gallery: true
+    number_sections: true
+    code_folding: show
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, eval= TRUE,
+                      comment = NA, fig.align = "center", out.width = "100%")
+```
+
+# Introducción
+
+El presente documento se creó a partir del repositorio de GitHub del usuario [*Jfjelstul*](https://github.com/jfjelstul/worldcup), el cual consta de 27 datasets (aproximadamente 1.1 millones de datos) que cubren todos los aspectos de las 22 ediciones de la Copa del Mundo desde 1930 a 2022.<br>
+En base a estos datos, se los trabajó para convertirlos en información y elaborar gráficos e indicadores que sirvan para tener un pantallazo de la historia de la copa más famosa y anhelada en el mundo deportivo.<br>
+En la Copa Mundial Masculina de la FIFA, que se celebra cada cuatro años, 32 naciones compiten entre sí por el título. Los distintos clasificatorios continentales dan paso a una fase final de lo más emocionante, que congrega a los aficionados en torno a la pasión y el amor por el deporte rey.
+
+```{r repositorio, eval=FALSE}
+#### DESCARGAR EL DATASET ####
+#Se realiza solo la primera vez (con eval=TRUE), luego no es mas necesario instarlo.
+#repositorio: https://github.com/jfjelstul/worldcup
+#se necesita tener Rtools4
+#https://cran.r-project.org/bin/windows/Rtools/
+install.packages("devtools")
+devtools::install_github("jfjelstul/worldcup", force = TRUE)
+```
+
+```{r codigo_intro, results=FALSE}
+#Una vez que descargué el repositorio, instalo la libreria del dataset y las demas librerias que voy a usar a lo largo del codigo.
+library(worldcup)
+library(tidyverse)
+library(spData)
+library(sf)
+library(leaflet)
+library(dplyr)
+library(ggplot2)
+library(tibble)
+library(readr)
+library(gganimate)
+library(plotly)
+library(ggwordcloud)
+library(gridExtra)
+library(DT)
+
+#cargo libreria con datos geograficos
+data(world)
+world <- data.frame(st_read(system.file("shapes/world.gpkg", package="spData")))
+world <- world[,c("name_long","continent","geom")]
+
+#de la libreria worldcup, descargo el dataset "goles" que vamos a utilizar en los graficos 1 y 2
+goals <- worldcup::goals
+#cambiar nombres para que coincida con el paquete world
+```
+
+# Materiales y métodos
+
+Este torneo fue mutando a lo largo de los años acompañando la propia historia de los países. Desde 1930 han ocurrido un sinfín de eventos mundiales que repercutieron en los equipos participantes. Eventos tales como países que se separan, que se unen, que cambian de nombres; obligan a realizar una serie de modificaciones en la base de datos.<br>
+Estas modificaciones forman parte de la limpieza y orden de los datos.
+A fines de poder representar la performance de territorios que han cambiado de nombre y bandera, se hicieron las siguientes modificaciones en todas las tablas que se descargaron del paquete worldcup:
+
+```{r modificacion dataset, echo = TRUE}
+goals$team_name[goals$team_name == "West Germany"] <- "Germany"
+goals$team_name[goals$team_name == "East Germany"] <- "Germany"
+goals$team_name[goals$team_name == "England"] <- "United Kingdom"
+goals$team_name[goals$team_name == "Wales"] <- "United Kingdom"
+goals$team_name[goals$team_name == "Northern Ireland"] <- "United Kingdom"
+goals$team_name[goals$team_name == "Scotland"] <- "United Kingdom"
+goals$team_name[goals$team_name == "Republic of Ireland"] <- "Ireland"
+goals$team_name[goals$team_name == "North Korea"] <- "Dem. Rep. Korea"
+goals$team_name[goals$team_name == "South Korea"] <- "Dem. Rep. Korea"
+goals$team_name[goals$team_name == "Ivory Coast"] <- "Côte d'Ivoire"
+goals$team_name[goals$team_name == "Serbia and Montenegro"] <- "Serbia"
+goals$team_name[goals$team_name == "Yugoslavia"] <- "Serbia"
+goals$team_name[goals$team_name == "Czechoslovakia"] <- "Czech Republic"
+goals$team_name[goals$team_name == "Russia"] <- "Russian Federation"
+goals$team_name[goals$team_name == "Soviet Union"] <- "Russian Federation"
+```
+
+```{r modificacion dataset 2}
+#de la fecha, me quedo solamente con el año
+goals <- mutate(goals, year = as.numeric(format(goals$match_date, format = "%Y")))
+#Quiero tener un df que sea: AÑO, PAIS, count(goals)
+goals_year_pais <- goals %>%  group_by(year,team_name) %>% summarize(goles = n())
+
+#creamos un score que compute y pondere la cantidad de veces que los equipos fueron semifinalistas.
+ganadores <- worldcup::tournament_standings
+ganadores <- ganadores %>%mutate(score = case_when(
+  position == "4" ~ 1,
+  position == "3" ~ 2,
+  position == "2" ~ 3,
+  position == "1" ~ 4))
+ganadores <- ganadores %>%mutate(ganador = case_when(position == "1" ~ 1))
+ganadores$ganador[is.na(ganadores$ganador)] <- 0
+ganadores$team_name[ganadores$team_name == "West Germany"] <- "Germany"
+ganadores$team_name[ganadores$team_name == "East Germany"] <- "Germany"
+ganadores$team_name[ganadores$team_name == "England"] <- "United Kingdom"
+ganadores$team_name[ganadores$team_name == "Wales"] <- "United Kingdom"
+ganadores$team_name[ganadores$team_name == "Northern Ireland"] <- "United Kingdom"
+ganadores$team_name[ganadores$team_name == "Scotland"] <- "United Kingdom"
+ganadores$team_name[ganadores$team_name == "Republic of Ireland"] <- "Ireland"
+ganadores$team_name[ganadores$team_name == "North Korea"] <- "Dem. Rep. Korea"
+ganadores$team_name[ganadores$team_name == "South Korea"] <- "Dem. Rep. Korea"
+ganadores$team_name[ganadores$team_name == "Ivory Coast"] <- "Côte d'Ivoire"
+ganadores$team_name[ganadores$team_name == "Serbia and Montenegro"] <- "Serbia"
+ganadores$team_name[ganadores$team_name == "Yugoslavia"] <- "Serbia"
+ganadores$team_name[ganadores$team_name == "Czechoslovakia"] <- "Czech Republic"
+ganadores$team_name[ganadores$team_name == "Russia"] <- "Russian Federation"
+ganadores$team_name[ganadores$team_name == "Soviet Union"] <- "Russian Federation"
+ganadores <- ganadores %>%  group_by(team_name) %>% summarise(score = sum(score), primer_puesto = sum(ganador)) 
+ganadores <-data.frame(ganadores)
+
+#el dataset partido lo utilizaremos en los graficos 3 y 4
+partidos <- worldcup::matches
+partidos$year <- as.numeric(format(partidos$match_date, "%Y"))
+```
+
+<br> Pensar en la copa del mundo es pensar en ciertos países que históricamente han destacado en el futbol. No solo por haber ganado el primer lugar sino por siempre mantenerse en el podio. <br>
+La tabla “tournament_standings” provee información sobre los resultados de cada torneo. Particularmente almacena información sobre el primer, segundo, tercer y cuarto puesto de cada edición del torneo. Con esta información se diseñará un indicador para puntuar la performance de los países teniendo en cuenta cuantas veces logró estar entre los primeros 4 puestos. El objetivo es construir un indicador que sea más representativo que la cantidad de veces que cada país ganó la copa. <br>
+Entonces, el indicador “Score” refleja la cantidad de veces que un equipo fue finalista o semifinalista en esta competición, otorgándole 1, 2, 3 o 4 puntos dependiendo si su posición fue cuarta, tercera, segunda o primera respectivamente.  <br>
+El indicador "primer_puesto" es la cantidad de veces que un equipo ganó la copa del mundo<br>
+De esta manera, la tabla de posiciones considerando todos los mundiales queda de la siguiente manera:
+
+
+```{r tabla}
+datatable(data = ganadores, filter = "top", options = list(scrollX = TRUE))
+```
+
+La misma información la podemos observar de manera gráfica, de manera tal que los paises con un score más alto, aparecen graficados más grandes y de colores más oscuros:
+
+```{r nube_palabras}
+ganadores_wcloud <- filter(ganadores, ganadores$score > 0)
+ganadores_wcloud %>% ggplot()+ 
+  aes(label = team_name, size = score, color = score) +
+  geom_text_wordcloud(eccentricity=1) +
+  scale_size_area (max_size = 20) + 
+  scale_color_gradient(low = "lightblue", high="darkblue") +
+  theme_minimal()
+```
+
+# Resultados
+
+Teniendo los datasets organizados se prosigue a transformar los datos en información, con el objetivo de representarlos en gráficos amigables, intuitivos e interesantes.
+
+## Bar chart race
+
+Además del score que se construyó anteriormente, es interesante observar la cantidad de goles que ha convertido cada país a lo largo de la historia. De esta manera, se muestra en el siguiente gráfico, por año, el ranking de los países con más goles acumulados.
+
+```{r race}
+#Partiendo del data set de goles, debemos agrupar los goles por pais y por año, de forma de tener primero la suma de goles de cada mundial, y luego la suma acumulada de todos los años.
+goals_g1 <- goals_year_pais %>% group_by(team_name) %>%  arrange(year) %>% mutate(goles_cumsum = cumsum(goles))
+#para que un pais conserve su suma acumulada por mas que no haya convertidos goles en un mundial determinado, tengo que tener una fila para cada combinacion de todos los paises y todos los años.
+anios <- unique(goals_g1$year)
+paises <- unique(goals_g1$team_name)
+combinaciones <- expand.grid(paises, anios)
+colnames(combinaciones) <-  c("paises","anios")
+#con la lista exhaustiva, uno los DF.
+combinaciones <- left_join(combinaciones, goals_g1, by = c("paises" = "team_name", "anios" = "year"))
+combinaciones[is.na(combinaciones)] <- 0
+combinaciones <- combinaciones %>% group_by(paises) %>%  arrange(anios) %>% mutate(goles_cumsum = cumsum(goles))
+#para cada año asignamos un ranking y filtro en cada año los mejores 10 paises.
+goals_g1 <- combinaciones %>% group_by(anios) %>% arrange(anios, -goles_cumsum) %>% mutate(rank = 1:n()) %>% filter(rank<=10)
+goals_g1 <- data.frame(goals_g1)
+#lo uno con el DF world para poder luego distinguir con colores los distintos continentes
+goals_g1 <- left_join(goals_g1, world, by=c("paises"="name_long"))
+
+#crear el grafico
+p <- ggplot(goals_g1, aes(x = - rank,y = goles_cumsum , group = paises)) + 
+  geom_tile(aes(y = goles_cumsum / 2, height = goles_cumsum, fill = continent), width = 0.9) +
+  geom_text(aes(label = paises), hjust = "right", colour = "black", fontface = "bold", nudge_y = -30) +
+  geom_text(aes(label = scales::comma(goles_cumsum)), hjust = "left", nudge_y = 30, colour = "grey30") +
+  coord_flip(clip="off") +
+  scale_fill_manual(name = 'Continente', values = c("#66c2a5", "#fc8d62", "#e78ac3")) +
+  scale_x_discrete("") +
+  scale_y_continuous("",labels=scales::comma) +
+  hrbrthemes::theme_ipsum(plot_title_size = 24, caption_size = 10, base_size = 10) +
+  theme(panel.grid.major.y=element_blank(),
+        panel.grid.minor.x=element_blank(),
+        legend.position = c(0.8, 0.2),
+        plot.margin = margin(1,1,1,2,"cm"),
+        axis.text.y=element_blank()) +
+  #animacion
+  transition_time(anios) +
+  ease_aes('cubic-in-out') +
+  labs(title='Top 10: paises con mas goles',
+       subtitle='Todos los goles hasta el año {round(frame_time,0)}',
+       caption=' ')
+
+p1 <- animate(p, duration= 30, renderer = gifski_renderer(), nframes = 72, end_pause = 50)
+p1
+```
+
+## Variables en el mapa
+
+Para una interpretación más amigable, se muestran los resultados que ha tenido cada país sobre un mapa interactivo. <br>
+De esta forma se puede observar, para cada país: <br>
+
+* Cuantos goles ha convertido a lo largo de todos los mundiales, 
+* Cual es su score actual en base a cuantas veces fue finalista o semifinalista, y  
+* Cuantas veces ha sido anfitrión de un torneo.<br>
+
+Los países se colorean en base a la cantidad de goles que han convertido.
+
+```{r mapa}
+#cargo el paquete host
+host <- worldcup::host_countries
+host$team_name[host$team_name == "West Germany"] <- "Germany"
+host$team_name[host$team_name == "East Germany"] <- "Germany"
+host$team_name[host$team_name == "England"] <- "United Kingdom"
+host$team_name[host$team_name == "Wales"] <- "United Kingdom"
+host$team_name[host$team_name == "Northern Ireland"] <- "United Kingdom"
+host$team_name[host$team_name == "Scotland"] <- "United Kingdom"
+host$team_name[host$team_name == "Republic of Ireland"] <- "Ireland"
+host$team_name[host$team_name == "North Korea"] <- "Dem. Rep. Korea"
+host$team_name[host$team_name == "South Korea"] <- "Dem. Rep. Korea"
+host$team_name[host$team_name == "Ivory Coast"] <- "Côte d'Ivoire"
+host$team_name[host$team_name == "Serbia and Montenegro"] <- "Serbia"
+host$team_name[host$team_name == "Yugoslavia"] <- "Serbia"
+host$team_name[host$team_name == "Czechoslovakia"] <- "Czech Republic"
+host$team_name[host$team_name == "Russia"] <- "Russian Federation"
+host$team_name[host$team_name == "Soviet Union"] <- "Russian Federation"
+#sumo la cantidad de veces que cada pais fue anfitrion
+host <- host %>%  group_by(team_name) %>% summarise(hosts = n())
+
+#goles
+#del paquete goles cargado anteriormente, los agrupo por pais y sumo todos los goles que han hecho en todos los mundiales
+paises_g2 <- goals %>%  group_by(team_name) %>% summarise(goles = n())
+#los concateno con el DF World para tener la informacion de los poligonos
+paises_g2 <- right_join(paises_g2, world, by = c("team_name"="name_long"))
+paises_g2 <- left_join(paises_g2, host, by = c("team_name"))
+paises_g2 <- left_join(paises_g2, ganadores, by = c("team_name"))
+
+#reemplazo NA con 0
+paises_g2$hosts[is.na(paises_g2$hosts)] <- 0
+paises_g2$score[is.na(paises_g2$score)] <- 0
+paises_g2$primer_puesto[is.na(paises_g2$primer_puesto)] <- 0
+paises_g2 <- data.frame(paises_g2)
+#cambio el tipo de contenedor para que el grafico detecte la columna en donde esta la informacion de poligonos
+paises_g2 <- st_as_sf(paises_g2)
+#defino paleta de colores
+paleta <- colorNumeric(palette = c("#b6c8cf", "#001f2b"), domain = paises_g2$goles)
+#defino que informacion quiero mostrar en el grafico
+textos <- paste0(
+  "<b>País:</b> ", paises_g2$team_name, 
+  "<br><b>Score:</b> ", paises_g2$score,
+  "<br><b>Host:</b> ", paises_g2$hosts, 
+  "<br><b>Goles:</b> ", paises_g2$goles,
+  "<br><b>Primer puesto:</b> ", paises_g2$primer_puesto)
+
+paises_g2 %>% 
+  leaflet() %>%
+  addPolygons(
+    color = ~paleta(goles), 
+    label = ~lapply(as.list(textos), htmltools::HTML), 
+    weight = 2, 
+    fillOpacity = 0.5
+  ) %>% 
+  addProviderTiles("Esri.WorldGrayCanvas")
+
+```
+
+## Variables por partido jugado
+
+Puede ser de interés visualizar como han ido evolucionando algunas variables a lo largo de los años. ¿Ahora se convierten más goles que antes?, ¿Las faltas y sustituciones en los equipos variaron o siempre fueron aproximadamente similares? <br>
+Para responder estas preguntas, Se va a normalizar en base a los partidos jugados las siguientes variables:  <br>
+
+* Goles,
+* Sustituciones,
+* Faltas (tarjeta amarilla y roja), 
+* Penales concedidos, y
+* Penales convertidos. <br>
+
+De esta manera, se podrá visualizar la cuantía de las variables anteriormente mencionadas por partido jugado. <br>
+Para los gráficos de esta sección, al pasar el cursor sobre un punto determinado, se despliega la información de ese punto. Particularmente, que país es, el año y el valor de la variable. <br>
+El tamaño de cada punto varía dependiendo los goles que haya convertido cada país.
+
+```{r dispersion}
+#determino cuantos partidos jugo cada pais en cada mundial (es la suma de los partidos local y visitante)
+partidos_g3_home <- partidos %>% group_by(year, home_team_name) %>% summarise(jugados = n())
+partidos_g3_away <- partidos %>% group_by(year, away_team_name) %>% summarise(jugados = n())
+partidos_g3 <- full_join(partidos_g3_home,partidos_g3_away, by = c("home_team_name" = "away_team_name", "year"="year"))
+partidos_g3$jugados.x[is.na(partidos_g3$jugados.x)] <- 0
+partidos_g3$jugados.y[is.na(partidos_g3$jugados.y)] <- 0
+partidos_g3$jugados <- partidos_g3$jugados.x + partidos_g3$jugados.y
+partidos_g3 <- partidos_g3[,!names(partidos_g3) %in% c("jugados.x","jugados.y")]
+colnames(partidos_g3)[colnames(partidos_g3)=="home_team_name"] = "team_name"
+
+#tarjetas
+#determino cuantas tarjetas recibio cada equipo en cada mundial
+bookings <- worldcup::bookings
+bookings$year <- as.numeric(format(bookings$match_date, "%Y"))
+bookings <-transform(bookings, yellow_card = as.numeric(yellow_card))
+bookings <-transform(bookings, red_card = as.numeric(red_card))
+bookings <-transform(bookings, second_yellow_card = as.numeric(second_yellow_card))
+bookings$tarjetas <- bookings$yellow_card + bookings$red_card + bookings$second_yellow_card
+bookings_gb <- bookings %>% group_by(year, team_name) %>% summarise(tarjetas = sum(tarjetas))
+partidos_g3 <- left_join(partidos_g3, bookings_gb, by= c("year", "team_name"))
+partidos_g3$tarjetas[is.na(partidos_g3$tarjetas)] <- 0
+
+#penales concedidos 
+#determino cuantos penales fueron concedidos a cada equipo en cada mundial
+penalties <- worldcup::penalty_kicks
+penalties$year <- as.numeric(format(penalties$match_date, "%Y"))
+penalties_gb <- penalties %>% group_by(year, team_name) %>% summarise(penales = n())
+partidos_g3 <- left_join(partidos_g3, penalties_gb, by= c("year","team_name"))
+partidos_g3$penales[is.na(partidos_g3$penales)] <- 0
+
+#penales convertidos
+#determino cuantos convirtió cada equipo en cada mundial
+penalties <- transform(penalties, converted = as.numeric(converted))
+penales_convertidos <- filter(penalties, converted == "1")
+penalties_convertidos_gb <- penales_convertidos %>% group_by(year, team_name) %>% summarise(penales_convertidos = n())
+partidos_g3 <- left_join(partidos_g3, penalties_convertidos_gb, by= c("year","team_name"))
+partidos_g3$penales_convertidos[is.na(partidos_g3$penales_convertidos)] <- 0
+
+#sustituciones
+#determino cuantas sustituciones de jugadores realizo cada equipo en cada mundial
+substitutions <- worldcup::substitutions
+substitutions$year <- as.numeric(format(substitutions$match_date, "%Y"))
+sustituciones_gb <- substitutions%>% group_by(year, team_name) %>% summarise(sustituciones = n())
+sustituciones_gb$sustituciones <- round(sustituciones_gb$sustituciones/2)
+partidos_g3 <- left_join(partidos_g3, sustituciones_gb, by= c("year","team_name"))
+partidos_g3$sustituciones[is.na(partidos_g3$sustituciones)] <- 0
+
+#goles
+#Sumo el dataset de goles que ya habia armado
+partidos_g3 <- left_join(partidos_g3, goals_year_pais, by= c("year","team_name"))
+partidos_g3$goles[is.na(partidos_g3$goles)] <- 0
+
+#final score
+#Sumo el dataset de score que ya habia armado
+paises_score <- ganadores %>%  group_by(team_name) %>% summarise(puntaje = sum(score))
+partidos_g3 <- left_join(partidos_g3, paises_score, by= c("team_name"))
+partidos_g3$puntaje[is.na(partidos_g3$puntaje)] <- 0
+
+#estandarizar ratios
+fun1 <- function(x, y) round(x/y,1)
+partidos_g3$tarjetas_x_partido <- mapply(fun1, partidos_g3$tarjetas, partidos_g3$jugados)
+partidos_g3$sustituciones_x_partido <- mapply(fun1, partidos_g3$sustituciones, partidos_g3$jugados)
+partidos_g3$penales_x_partido <- mapply(fun1, partidos_g3$penales, partidos_g3$jugados)
+partidos_g3$penales_conv_x_partido <- mapply(fun1, partidos_g3$penales_convertidos, partidos_g3$jugados)
+partidos_g3$goles_x_partido <- mapply(fun1, partidos_g3$goles, partidos_g3$jugados)
+
+#limpio los nombres en base al paquete world
+partidos_g3$team_name[partidos_g3$team_name == "West Germany"] <- "Germany"
+partidos_g3$team_name[partidos_g3$team_name == "East Germany"] <- "Germany"
+partidos_g3$team_name[partidos_g3$team_name == "England"] <- "United Kingdom"
+partidos_g3$team_name[partidos_g3$team_name == "Wales"] <- "United Kingdom"
+partidos_g3$team_name[partidos_g3$team_name == "Northern Ireland"] <- "United Kingdom"
+partidos_g3$team_name[partidos_g3$team_name == "Scotland"] <- "United Kingdom"
+partidos_g3$team_name[partidos_g3$team_name == "Republic of Ireland"] <- "Ireland"
+partidos_g3$team_name[partidos_g3$team_name == "North Korea"] <- "Dem. Rep. Korea"
+partidos_g3$team_name[partidos_g3$team_name == "South Korea"] <- "Dem. Rep. Korea"
+partidos_g3$team_name[partidos_g3$team_name == "Ivory Coast"] <- "Côte d'Ivoire"
+partidos_g3$team_name[partidos_g3$team_name == "Serbia and Montenegro"] <- "Serbia"
+partidos_g3$team_name[partidos_g3$team_name == "Yugoslavia"] <- "Serbia"
+partidos_g3$team_name[partidos_g3$team_name == "Czechoslovakia"] <- "Czech Republic"
+partidos_g3$team_name[partidos_g3$team_name == "Russia"] <- "Russian Federation"
+partidos_g3$team_name[partidos_g3$team_name == "Soviet Union"] <- "Russian Federation"
+partidos_g3 <- left_join(partidos_g3, world, by=c("team_name"="name_long"))
+```
+
+
+El siguiente gráfico muestra los **Goles por partido** de cada país en cada uno de los mundiales.
+
+```{r goles_x_partido}
+plot_ly(partidos_g3, x = ~ year, y = ~ goles_x_partido, type = 'scatter', mode = 'markers', size = ~puntaje, alpha = 0.5,
+        hoverinfo = 'text',
+        text = ~paste('</br> Pais: ', team_name,
+                      '</br> Goles: ', goles_x_partido,
+                      '</br> Año: ', year))
+```
+
+El siguiente gráfico muestra las **Sustituciones por partido** de cada pais en cada uno de los mundiales. Destacamos aquí que impacta como han ido aumentando las sustituciones máximas permitidas, desde 2 a 3 y luego a 5. Hay algunos países que ocasionalmente han excedido esos límites, lo cual se debe a las sustituciones adicionales por tiempo extra añadido al partido. <br>
+Solo se cuenta con información a partir del año 1970.
+
+```{r sustituciones_x_partidos}
+plot_ly(partidos_g3, x = ~ year, y = ~ sustituciones_x_partido, type = 'scatter', mode = 'markers', size = ~puntaje, alpha = 0.5,
+        hoverinfo = 'text',
+        text = ~paste('</br> Pais: ', team_name,
+                      '</br> Sustituciones: ', sustituciones_x_partido,
+                      '</br> Año: ', year))
+```
+
+La variable **Tarjetas por partido** suma las tarjetas amarillas y rojas que han sido cobradas en los partidos a partir del año 1970.
+
+```{r tarjetas_x_partido}
+#Una vez con el DF armado, solo resta grafica la columna de interes
+plot_ly(partidos_g3, x = ~ year, y = ~ tarjetas_x_partido, type = 'scatter', mode = 'markers', size = ~puntaje, alpha = 0.5,
+        hoverinfo = 'text',
+        text = ~paste('</br> Pais: ', team_name,
+                      '</br> Tarjetas: ', tarjetas_x_partido,
+                      '</br> Año: ', year))
+```
+
+Siguiendo la línea de las faltas cobradas con tarjetas, se puede analizar cómo fue variando la cantidad de **Penales por partido**. <br>
+Para esta variable, se tienen datos desde 1982.
+
+```{r penales_x_partidos}
+plot_ly(partidos_g3, x = ~ year, y = ~ penales_x_partido, type = 'scatter', mode = 'markers', size = ~puntaje, alpha = 0.5,
+        hoverinfo = 'text',
+        text = ~paste('</br> Pais: ', team_name,
+                      '</br> Penales concedidos: ', penales_x_partido,
+                      '</br> Penales conv.: ', penales_conv_x_partido,
+                      '</br> Año: ', year))
+```
+
+Y, de manera análoga, los **Partidos convertidos por partidos**:
+
+```{r penales_conv_x_partidos}
+plot_ly(partidos_g3, x = ~ year, y = ~ penales_conv_x_partido, type = 'scatter', mode = 'markers', size = ~puntaje, alpha = 0.5,
+        hoverinfo = 'text',
+        text = ~paste('</br> Pais: ', team_name,
+                      '</br> Penales concedidos: ', penales_x_partido,
+                      '</br> Penales conv.: ', penales_conv_x_partido,
+                      '</br> Año: ', year))
+```
+
+Teniendo la información sobre los penales pateados y convertidos, se puede analizar la **Eficiencia en la conversión de goles**. <br>
+En el siguiente gráfico, se puede observar cómo ha sido la eficiencia a lo largo de los años, agrupado por continente.<br>
+La eficiencia se calcula como la cantidad de goles convertidos en penal sobre la cantidad de penales pateados.<br>
+En las referencias, se puede clicklear un continente en particular para ocultar su gráfico.
+
+```{r eficiencia}
+eficiencia_region <-  partidos_g3 %>% group_by(year, continent) %>% summarise(penales_x_partido = sum(penales_x_partido), penales_conv_x_partido = sum(penales_conv_x_partido)) 
+eficiencia_region <-  filter(eficiencia_region,year >= 1982)
+eficiencia_region$eficiencia <- round(eficiencia_region$penales_conv_x_partido / eficiencia_region$penales_x_partido,1)
+eficiencia_region$eficiencia[is.na(eficiencia_region$eficiencia)] <- 0
+eficiencia_region <- na.omit(eficiencia_region)
+plot_ly(eficiencia_region, x = ~ year, y = ~ eficiencia, color = ~continent, size = 20,type = 'scatter', mode = 'markers',
+        hoverinfo = 'text',
+        text = ~paste('</br> Region: ', continent,
+                      '</br> penales: ', penales_x_partido,
+                      '</br> Penales conv.: ', penales_conv_x_partido))
+```
+
+En lo que respecta exclusivamente a la última edición de la copa del mundo, a continuación se presenta una lista de la eficiencia de los paises que han pateado penales.
+
+
+```{r eficiencia paises}
+paises_eficiencia <- filter(partidos_g3, year == 2022)
+paises_eficiencia <- filter(paises_eficiencia, penales_x_partido > 0)
+paises_eficiencia$eficiencia <- round(paises_eficiencia$penales_conv_x_partido / paises_eficiencia$penales_x_partido,1)
+paises_eficiencia$eficiencia[is.na(paises_eficiencia$eficiencia)] <- 0
+paises_eficiencia <- paises_eficiencia[,c("team_name","eficiencia")]
+datatable(data = paises_eficiencia, filter = "top", options = list(scrollX = TRUE))
+```
+
+## Performance en cada mundial.
+Consagrarse campeón del mundo no es nada fácil. Se deben ganar todos, o casi todos, los partidos jugados. <br>
+A continuación, se muestran cuantos partidos ganó, empató y perdió (en ese orden) los países que lideran el podio en base al score diseñado. <br>
+En la Shiny app [*adjunta*](https://almadaagus.shinyapps.io/wordcup/?_ga=2.91109214.531684853.1675254795-1771352763.1675254795)
+se pueden ver los resultados para todos los países. 
+```{r resultados}
+#Armo DF para almacenar cuantos partidos gano, empato y perdio cada pais
+columnas <- c("Anio", "Pais", "P.Ganados", "P.Empatados","P.Perdidos")
+partidos_pais <- data.frame(matrix(nrow = 0, ncol = length(columnas)))
+colnames(partidos_pais) <- columnas
+
+#de la tabla partidos me fijo como fue el resultado, y en base a eso sumo el contenedor correspondiente
+for(i in 1:nrow(partidos)) {
+  partidos_pais <- rbind(partidos_pais, c(partidos$year[i], partidos$home_team_name[i],partidos$home_team_win[i], partidos$draw[i],partidos$away_team_win[i]))
+  colnames(partidos_pais) <- columnas
+  partidos_pais <- rbind(partidos_pais, c(partidos$year[i], partidos$away_team_name[i],partidos$away_team_win[i], partidos$draw[i],partidos$home_team_win[i]))
+  colnames(partidos_pais) <- columnas
+}
+
+#Agrupo los resultados por pais y por año
+partidos_pais <-transform(partidos_pais, P.Ganados = as.numeric(P.Ganados))
+partidos_pais <-transform(partidos_pais, P.Empatados = as.numeric(P.Empatados))
+partidos_pais <-transform(partidos_pais, P.Perdidos = as.numeric(P.Perdidos))
+partidos_pais_anio <- partidos_pais %>% group_by(Anio, Pais) %>% summarise(p.ganados = sum(P.Ganados), p.empatados = sum(P.Empatados), p.perdidos = sum(P.Perdidos))
+partidos_pais_anio$Anio <- as.character(partidos_pais_anio$Anio)
+partidos_pais_anio <- data.frame(partidos_pais_anio)
+
+#Grafico
+partidos_g4 <- filter(partidos_pais_anio,Pais == "Germany")
+g4_germany <- partidos_g4  %>% group_by(Anio) %>%
+  summarise(n=n(),
+            won = sum(p.ganados),
+            tied = sum(p.empatados),
+            lost = sum(p.perdidos)) %>% 
+  gather("key", "value", - c(Anio, n)) %>%
+  ggplot(aes(x = Anio, y = value, group = key, fill = key)) + 
+  geom_col() + 
+  coord_flip() +
+  scale_fill_manual(values = c("#8b0000","#e6e600" , "#006400")) +
+  labs(title ="Alemania") +
+  theme_bw()+
+  theme(axis.text.y=element_text(size=rel(0.7))) +
+  scale_x_discrete(name = "Mundiales") +
+  scale_y_continuous(name = "Partidos", breaks = seq(0,7,1))
+
+
+partidos_g4 <- filter(partidos_pais_anio,Pais == "Brazil")
+g4_brazil <- partidos_g4  %>% group_by(Anio) %>%
+  summarise(n=n(),
+            won = sum(p.ganados),
+            tied = sum(p.empatados),
+            lost = sum(p.perdidos)) %>% 
+  gather("key", "value", - c(Anio, n)) %>%
+  ggplot(aes(x = Anio, y = value, group = key, fill = key)) + 
+  geom_col() + 
+  coord_flip() +
+  scale_fill_manual(values = c("#8b0000","#e6e600" , "#006400")) +
+  labs(title ="Brazil") +
+  theme_bw()+
+  theme(axis.text.y=element_text(size=rel(0.7))) +
+  scale_x_discrete(name = "Mundiales") +
+  scale_y_continuous(name = "Partidos", breaks = seq(0,7,1))
+
+partidos_g4 <- filter(partidos_pais_anio,Pais == "Italy")
+g4_italy <- partidos_g4  %>% group_by(Anio) %>%
+  summarise(n=n(),
+            won = sum(p.ganados),
+            tied = sum(p.empatados),
+            lost = sum(p.perdidos)) %>% 
+  gather("key", "value", - c(Anio, n)) %>%
+  ggplot(aes(x = Anio, y = value, group = key, fill = key)) + 
+  geom_col() + 
+  coord_flip() +
+  scale_fill_manual(values = c("#8b0000","#e6e600" , "#006400")) +
+  labs(title ="Italia") +
+  theme_bw()+
+  theme(axis.text.y=element_text(size=rel(0.7))) +
+  scale_x_discrete(name = "Mundiales") +
+  scale_y_continuous(name = "Partidos", breaks = seq(0,7,1))
+
+partidos_g4 <- filter(partidos_pais_anio,Pais == "Argentina")
+g4_argentina <- partidos_g4  %>% group_by(Anio) %>%
+  summarise(n=n(),
+            won = sum(p.ganados),
+            tied = sum(p.empatados),
+            lost = sum(p.perdidos)) %>% 
+  gather("key", "value", - c(Anio, n)) %>%
+  ggplot(aes(x = Anio, y = value, group = key, fill = key)) + 
+  geom_col() + 
+  coord_flip() +
+  scale_fill_manual(values = c("#8b0000","#e6e600" , "#006400")) +
+  labs(title ="Argentina") +
+  theme_bw()+
+  theme(axis.text.y=element_text(size=rel(0.7))) +
+  scale_x_discrete(name = "Mundiales") +
+  scale_y_continuous(name = "Partidos", breaks = seq(0,7,1))
+
+grid.arrange(g4_germany, g4_brazil,g4_italy, g4_argentina, ncol=2, nrow =2)
+
+```
+
+# Conclusiones
+
+A lo largo del trabajo se ha seleccionado, organizado y limpiado datos para convertirlos en información. Esa información luego fue transformada para que se pueda visualizar en gráficos interesantes, intuitivos y amigables. <br>
+Si bien aquí se optó por graficar las variables más representativas del dataset orginal, para la persona al que le interese la temática, la información abunda, y son innumerables las variables de interés. <br>
+Para futuras investigaciones, sería sumamente interesante complementar la información presentada con datos sobre cómo vivieron las personas, los hinchas de cada equipo, cada uno de los mundiales. Para ello Twitter se perfila como una base de datos ideal.
